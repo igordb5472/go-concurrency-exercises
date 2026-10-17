@@ -20,11 +20,14 @@ package main
 import (
 	"errors"
 	"log"
+	"sync"
+	"time"
 )
 
 // SessionManager keeps track of all sessions from creation, updating
 // to destroying.
 type SessionManager struct {
+	mu       sync.RWMutex
 	sessions map[string]Session
 }
 
@@ -49,9 +52,26 @@ func (m *SessionManager) CreateSession() (string, error) {
 		return "", err
 	}
 
+	renew := make(chan struct{})
+	data := map[string]interface{}{"renew": renew}
+	m.mu.Lock()
 	m.sessions[sessionID] = Session{
-		Data: make(map[string]interface{}),
+		Data: data,
 	}
+	m.mu.Unlock()
+
+	go func() {
+		timer := time.NewTimer(5 * time.Second)
+		for {
+			select {
+			case <-timer.C:
+				m.deleteSession(sessionID)
+				return
+			case <-renew:
+				timer.Reset(5 * time.Second)
+			}
+		}
+	}()
 
 	return sessionID, nil
 }
@@ -63,7 +83,9 @@ var ErrSessionNotFound = errors.New("SessionID does not exists")
 // GetSessionData returns data related to session if sessionID is
 // found, errors otherwise
 func (m *SessionManager) GetSessionData(sessionID string) (map[string]interface{}, error) {
+	m.mu.RLock()
 	session, ok := m.sessions[sessionID]
+	m.mu.RUnlock()
 	if !ok {
 		return nil, ErrSessionNotFound
 	}
@@ -72,17 +94,32 @@ func (m *SessionManager) GetSessionData(sessionID string) (map[string]interface{
 
 // UpdateSessionData overwrites the old session data with the new one
 func (m *SessionManager) UpdateSessionData(sessionID string, data map[string]interface{}) error {
+	m.mu.RLock()
 	_, ok := m.sessions[sessionID]
+	m.mu.RUnlock()
 	if !ok {
 		return ErrSessionNotFound
 	}
 
 	// Hint: you should renew expiry of the session here
+	m.mu.RLock()
+	data["renew"] = m.sessions[sessionID].Data["renew"]
+	m.mu.RUnlock()
+	m.mu.Lock()
 	m.sessions[sessionID] = Session{
 		Data: data,
 	}
+	m.mu.Unlock()
+	data["renew"].(chan struct{}) <- struct{}{}
 
 	return nil
+}
+
+// DeleteSession deletes the session
+func (m *SessionManager) deleteSession(sessionID string) {
+	m.mu.Lock()
+	delete(m.sessions, sessionID)
+	defer m.mu.Unlock()
 }
 
 func main() {
