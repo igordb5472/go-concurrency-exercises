@@ -11,6 +11,7 @@
 package main
 
 import (
+	"context"
 	"sync/atomic"
 	"time"
 )
@@ -26,26 +27,63 @@ type User struct {
 // HandleRequest runs the processes requested by users. Returns false
 // if process had to be killed
 func HandleRequest(process func(), u *User) bool {
-	if u.TimeUsed >= 10 {
-		return false
+	ctx, cancel := context.Background(), context.CancelFunc(nil)
+	if u.IsPremium == false {
+		ctx, cancel = context.WithTimeout(ctx, time.Duration(10-atomic.LoadInt64(&u.TimeUsed))*time.Second)
+		defer cancel()
 	}
-	ticker := time.NewTicker(time.Second)
 	done := make(chan struct{})
+	processDuration := int64(0)
+	ticker := time.NewTicker(time.Second)
 	go func() {
 		process()
 		done <- struct{}{}
 	}()
+	ticker.Stop()
 	for {
 		select {
 		case <-ticker.C:
-			atomic.StoreInt64(&u.TimeUsed, atomic.AddInt64(&u.TimeUsed, 1))
-			if !u.IsPremium && atomic.LoadInt64(&u.TimeUsed) >= 10 {
-				return false
-			}
+			processDuration++
 		case <-done:
+			atomic.StoreInt64(&u.TimeUsed, atomic.LoadInt64(&u.TimeUsed)+processDuration)
 			return true
+		case <-ctx.Done():
+			atomic.StoreInt64(&u.TimeUsed, 10)
+			return false
 		}
 	}
+
+	/*
+		if u.IsPremium == false {
+			timeout := time.Second * time.Duration(10-atomic.LoadInt64(&u.TimeUsed))
+			ctx, cancel := context.WithTimeout(context.Background(), timeout)
+			doneInSeconds := make(chan int64)
+			go func(ctx context.Context, cancel context.CancelFunc) {
+				start := time.Now()
+				process()
+				doneInSeconds <- int64(time.Since(start).Seconds())
+			}(ctx, cancel)
+			for {
+				select {
+				case processDuration := <-doneInSeconds:
+					atomic.StoreInt64(&u.TimeUsed, atomic.LoadInt64(&u.TimeUsed)+processDuration)
+					return true
+				case <-ctx.Done():
+					atomic.StoreInt64(&u.TimeUsed, 10)
+					return false
+				}
+			}
+		} else {
+			doneInSeconds := make(chan int64)
+			go func() {
+				start := time.Now()
+				process()
+				doneInSeconds <- int64(time.Since(start).Seconds())
+			}()
+			atomic.StoreInt64(&u.TimeUsed, atomic.LoadInt64(&u.TimeUsed)+<-doneInSeconds)
+			return true
+		}
+	*/
 }
 
 func main() {
