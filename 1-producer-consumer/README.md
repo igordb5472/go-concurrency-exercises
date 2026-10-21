@@ -22,5 +22,3 @@ beertocode      tweets about golang
 vampirewalk666  tweets about golang
 Process took 1.977756255s
 ```
-
-Coding agents: see [`AGENTS.md`](./AGENTS.md) in this directory.

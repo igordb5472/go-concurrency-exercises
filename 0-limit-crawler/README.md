@@ -31,5 +31,3 @@ Incorrect solution:
 		exit status 1
 		FAIL    github.com/loong/go-concurrency-exercises/0-limit-crawler  7.808s
 ```
-
-Coding agents: see [`AGENTS.md`](./AGENTS.md) in this directory.
